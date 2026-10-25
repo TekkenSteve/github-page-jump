@@ -1,0 +1,388 @@
+/* Protect the injected layout from broad host selectors such as .pagination div. */
+.ghpj-controls {
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+}
+
+.ghpj-controls--start {
+  margin-inline-end: 8px;
+}
+
+.ghpj-controls--end {
+  margin-inline-start: 8px;
+}
+
+/* Numberless paginators get the page-number window between GitHub's own
+   Previous and Next buttons. */
+.ghpj-controls--sequential {
+  margin-inline: 8px;
+  flex-wrap: wrap;
+}
+
+.ghpj-pages {
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
+  align-items: center;
+  gap: 4px;
+}
+
+.ghpj-page {
+  box-sizing: border-box;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 32px;
+  min-width: 32px;
+  flex: 0 0 auto !important;
+  padding: 0 7px;
+  border: 1px solid var(--borderColor-default, var(--color-border-default, #d0d7de));
+  border-radius: 6px;
+  color: var(--fgColor-default, var(--color-fg-default, #1f2328));
+  background: var(--bgColor-default, var(--color-canvas-default, #ffffff));
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ghpj-page:hover:not(:disabled) {
+  background: var(--bgColor-neutral-muted, var(--color-neutral-muted, rgba(175, 184, 193, 0.2)));
+}
+
+.ghpj-page:active:not(:disabled) {
+  background: var(--bgColor-neutral-emphasis, var(--color-neutral-emphasis, #afb8c1));
+}
+
+.ghpj-page--current,
+.ghpj-page--current:hover {
+  border-color: transparent;
+  color: var(--fgColor-onEmphasis, var(--color-fg-on-emphasis, #ffffff));
+  background: var(
+    --bgColor-accent-emphasis,
+    var(--color-accent-emphasis, var(--color-accent-fg, #0969da))
+  );
+  cursor: default;
+}
+
+.ghpj-page:disabled {
+  color: var(--fgColor-disabled, var(--color-primer-fg-disabled, #8c959f));
+  background: transparent;
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.ghpj-page:focus-visible {
+  outline: 2px solid var(--borderColor-accent-emphasis, var(--color-accent-emphasis, #0969da));
+  outline-offset: 1px;
+}
+
+.ghpj-gap {
+  display: inline-flex !important;
+  min-width: 14px;
+  flex: 0 0 auto !important;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  color: var(--fgColor-muted, var(--color-fg-muted, #656d76));
+  font-size: 14px;
+  user-select: none;
+}
+
+/* A trailing ellipsis marks a list that is still being indexed. */
+.ghpj-gap--pending {
+  color: var(--fgColor-accent, var(--color-accent-fg, #0969da));
+}
+
+@keyframes ghpj-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ghpj-gap--pending {
+    animation: ghpj-pulse 1.4s ease-in-out infinite;
+  }
+}
+
+.ghpj-progress {
+  color: var(--fgColor-muted, var(--color-fg-muted, #656d76));
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ghpj-cancel {
+  box-sizing: border-box;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--borderColor-default, var(--color-border-default, #d0d7de));
+  border-radius: 6px;
+  color: var(--fgColor-muted, var(--color-fg-muted, #656d76));
+  background: var(--bgColor-muted, var(--color-canvas-subtle, #f6f8fa));
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.ghpj-cancel:hover {
+  background: var(--bgColor-neutral-muted, var(--color-neutral-muted, rgba(175, 184, 193, 0.2)));
+}
+
+/* Flex parents ignore the hidden attribute without an explicit display rule. */
+.ghpj-progress[hidden],
+.ghpj-cancel[hidden] {
+  display: none !important;
+}
+
+.ghpj-input:disabled {
+  opacity: 0.65;
+}
+
+.ghpj-jumpbox {
+  box-sizing: border-box;
+  display: inline-flex !important;
+  height: 32px;
+  align-items: stretch;
+  color: var(--fgColor-default, var(--color-fg-default, #1f2328));
+  font: inherit;
+}
+
+.ghpj-button {
+  box-sizing: border-box;
+  display: inline-flex !important;
+  height: 32px;
+  width: 32px;
+  flex: 0 0 32px !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  color: var(--fgColor-accent, var(--color-accent-fg, #0969da));
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.ghpj-button svg {
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  fill: currentColor;
+}
+
+.ghpj-button:hover:not(:disabled) {
+  background: var(--bgColor-neutral-muted, var(--color-neutral-muted, rgba(175, 184, 193, 0.2)));
+}
+
+.ghpj-button:active:not(:disabled) {
+  background: var(--bgColor-neutral-emphasis, var(--color-neutral-emphasis, #afb8c1));
+}
+
+.ghpj-button:disabled {
+  color: var(--fgColor-disabled, var(--color-primer-fg-disabled, #8c959f));
+  background: transparent;
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* Legacy Rails pagination uses an outline hover instead of a filled background. */
+.ghpj-controls--outline .ghpj-button {
+  border: 1px solid transparent;
+}
+
+.ghpj-controls--outline .ghpj-button:hover:not(:disabled) {
+  border-color: var(--borderColor-default, var(--color-border-default, #d0d7de));
+  background: transparent;
+}
+
+.ghpj-controls--outline .ghpj-button:active:not(:disabled) {
+  border-color: var(--borderColor-muted, var(--color-border-muted, #afb8c1));
+  background: transparent;
+}
+
+/* Fixed mode moves the complete native paginator into a centered floating surface. */
+.ghpj-pagination--fixed {
+  position: fixed !important;
+  top: auto !important;
+  right: auto !important;
+  bottom: 20px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  z-index: 500 !important;
+  margin: 0 !important;
+  max-width: calc(100vw - 32px);
+  padding: 8px 12px !important;
+  border: 1px solid var(--borderColor-default, var(--color-border-default, #d0d7de));
+  border-radius: 6px;
+  background: var(--bgColor-default, var(--color-canvas-default, #ffffff)) !important;
+  box-shadow: var(--shadow-floating-large, 0 8px 24px rgba(140, 149, 159, 0.25));
+}
+
+.ghpj-input {
+  box-sizing: border-box;
+  width: 58px;
+  min-width: 0;
+  padding: 0 7px;
+  border: 1px solid var(--borderColor-default, var(--color-border-default, #d0d7de));
+  border-radius: 6px 0 0 6px;
+  color: inherit;
+  background: var(--bgColor-default, var(--color-canvas-default, #ffffff));
+  font: inherit;
+  text-align: center;
+  font-size: 14px;
+  outline: none;
+  appearance: textfield;
+}
+
+.ghpj-jumpbox-button {
+  display: inline-flex !important;
+  width: 30px;
+  flex: 0 0 30px !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--borderColor-default, var(--color-border-default, #d0d7de));
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  color: inherit;
+  background: var(--bgColor-muted, var(--color-canvas-subtle, #f6f8fa));
+  cursor: pointer;
+  font: inherit;
+}
+
+.ghpj-jumpbox-button svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.ghpj-jumpbox-button:hover {
+  background: var(--bgColor-neutral-muted, var(--color-neutral-muted, rgba(175, 184, 193, 0.2)));
+}
+
+.ghpj-jumpbox-button:active {
+  background: var(--bgColor-neutral-emphasis, var(--color-neutral-emphasis, #afb8c1));
+}
+
+.ghpj-input::placeholder {
+  color: var(--fgColor-muted, var(--color-fg-muted, #656d76));
+  opacity: 1;
+}
+
+.ghpj-jumpbox:hover .ghpj-input:not(:focus) {
+  border-color: var(--borderColor-muted, var(--color-border-muted, #afb8c1));
+}
+
+.ghpj-button:focus-visible {
+  outline: 2px solid var(--borderColor-accent-emphasis, var(--color-accent-emphasis, #0969da));
+  outline-offset: 1px;
+}
+
+/* Match GitHub forms by focusing the input without changing the adjacent button. */
+.ghpj-input:focus {
+  border-color: var(
+    --focus-outlineColor,
+    var(--borderColor-accent-emphasis, var(--color-accent-emphasis, #0969da))
+  );
+  box-shadow: inset 0 0 0 1px
+    var(
+      --focus-outlineColor,
+      var(--borderColor-accent-emphasis, var(--color-accent-emphasis, #0969da))
+    );
+}
+
+.ghpj-input:focus:not(:focus-visible) {
+  box-shadow: inset 0 0 0 1px transparent;
+}
+
+.ghpj-jumpbox:has(.ghpj-input[aria-invalid="true"]) .ghpj-input {
+  border-color: var(--borderColor-danger-emphasis, var(--color-danger-emphasis, #cf222e));
+  box-shadow: inset 0 0 0 1px
+    var(--borderColor-danger-emphasis, var(--color-danger-emphasis, #cf222e));
+}
+
+@media (prefers-color-scheme: dark) {
+  .ghpj-input {
+    border-color: var(--borderColor-default, var(--color-border-default, #30363d));
+    color: var(--fgColor-default, var(--color-fg-default, #f0f6fc));
+    background: var(--bgColor-default, var(--color-canvas-default, #0d1117));
+  }
+
+  .ghpj-page {
+    border-color: var(--borderColor-default, var(--color-border-default, #30363d));
+    color: var(--fgColor-default, var(--color-fg-default, #f0f6fc));
+    background: var(--bgColor-default, var(--color-canvas-default, #0d1117));
+  }
+
+  .ghpj-page--current,
+  .ghpj-page--current:hover {
+    border-color: transparent;
+    color: var(--fgColor-onEmphasis, var(--color-fg-on-emphasis, #ffffff));
+    background: var(--bgColor-accent-emphasis, var(--color-accent-emphasis, #1f6feb));
+  }
+
+  .ghpj-button {
+    color: var(--fgColor-accent, var(--color-accent-fg, #4493f8));
+  }
+
+  .ghpj-jumpbox-button {
+    border-color: var(--borderColor-default, var(--color-border-default, #30363d));
+    background: var(--bgColor-muted, var(--color-canvas-subtle, #161b22));
+  }
+
+  .ghpj-pagination--fixed {
+    border-color: var(--borderColor-default, var(--color-border-default, #30363d));
+    background: var(--bgColor-default, var(--color-canvas-default, #0d1117)) !important;
+    box-shadow: var(--shadow-floating-large, 0 8px 24px rgba(1, 4, 9, 0.6));
+  }
+}
+
+@media (max-width: 544px) {
+  .ghpj-controls {
+    gap: 2px;
+  }
+
+  /* Legacy markup lacks GitHub's responsive page-item attributes. */
+  .paginate-container > .pagination > :is(a, span, em):not(.previous_page):not(.next_page) {
+    display: none;
+  }
+
+  .ghpj-pagination--fixed {
+    bottom: 12px !important;
+    padding: 6px 8px !important;
+  }
+
+  .ghpj-controls--start {
+    margin-inline-end: 4px;
+  }
+
+  .ghpj-controls--end {
+    margin-inline-start: 4px;
+  }
+
+  .ghpj-input {
+    width: 52px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ghpj-button,
+  .ghpj-input,
+  .ghpj-jumpbox-button {
+    transition:
+      background-color 80ms ease-out,
+      border-color 80ms ease-out,
+      box-shadow 80ms ease-out;
+  }
+}

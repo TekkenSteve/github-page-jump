@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GitHub Page Jump fixture</title>
+    <link rel="stylesheet" href="../src/content.css" />
+  </head>
+  <body>
+    <main>
+      <h1>GitHub Page Jump fixture</h1>
+      <p>
+        Open this file directly in Chrome to exercise the injected controls against every supported
+        pagination structure. Navigation is blocked on purpose: watch the address bar or the console
+        output for the resolved target URL.
+      </p>
+
+      <h2>React pagination (<code>nav[data-component="Pagination"]</code>)</h2>
+      <nav data-component="Pagination" aria-label="Pagination" data-total-pages="42">
+        <div data-hidden-viewport-ranges="true">
+          <a href="?page=1" aria-label="Page 1">1</a>
+          <a href="?page=2" aria-label="Page 2">2</a>
+          <span aria-current="page">3</span>
+          <a href="?page=9" aria-label="Page 9">9</a>
+        </div>
+      </nav>
+
+      <h2>Accessibility-label pagination (<code>nav[aria-label="Pagination"]</code>)</h2>
+      <nav aria-label="Pagination">
+        <a href="?page=1" aria-label="Page 1">1</a>
+        <span aria-current="page">2</span>
+        <a href="?page=5" aria-label="Page 5">5</a>
+      </nav>
+
+      <h2>Legacy pagination (<code>.paginate-container</code>)</h2>
+      <div class="paginate-container">
+        <div class="pagination">
+          <span class="previous_page">Previous</span>
+          <a href="?page=2">2</a>
+          <em class="current">3</em>
+          <a href="?page=9">9</a>
+          <span class="next_page">Next</span>
+        </div>
+      </div>
+      <h2>
+        Page-parameter pagination (<code>.paginate-container</code> with <code>page</code> links)
+      </h2>
+      <p>
+        Profile tabs such as <code>?tab=repositories</code> carry a real <code>page</code> parameter
+        but hide the numbers behind Previous / Next. The fixture serves a fake 8-page list: typing a
+        page number jumps instantly, and the last-page control probes for the total.
+      </p>
+      <div class="paginate-container">
+        <div role="navigation" aria-label="Pagination" class="pagination">
+          <span class="previous_page disabled">Previous</span>
+          <a class="next_page" rel="next" href="?page=2">Next</a>
+        </div>
+      </div>
+
+      <h2>Cursor pagination (<code>.paginate-container</code> with <code>after</code> links)</h2>
+      <p>
+        GitHub lists such as <code>?tab=stars</code> paginate with an opaque cursor and no page
+        numbers. The fixture serves a fake 12-page chain, so the controls index it and log every
+        resolved URL to the console.
+      </p>
+      <div class="paginate-container">
+        <div class="BtnGroup" data-test-selector="pagination">
+          <button class="btn BtnGroup-item" disabled="disabled">Previous</button>
+          <a rel="nofollow" class="btn BtnGroup-item" href="?after=cursor1">Next</a>
+        </div>
+      </div>
+
+      <h2>Last page of a cursor chain (only a <code>before=</code> link)</h2>
+      <p>
+        The final page of a cursor list carries no <code>after=</code> link at all: Previous is a
+        <code>before=</code> link and Next is a disabled button. The number window must keep working
+        here instead of disappearing.
+      </p>
+      <div class="paginate-container">
+        <div class="BtnGroup" data-test-selector="pagination">
+          <a rel="nofollow" class="btn BtnGroup-item" href="?before=cursor10">Previous</a>
+          <button class="btn BtnGroup-item" disabled="disabled">Next</button>
+        </div>
+      </div>
+    </main>
+
+    <script src="../src/core.js"></script>
+    <script src="../src/cursor.js"></script>
+    <script src="../src/pageindex.js"></script>
+    <script src="../src/shared.js"></script>
+    <script src="../src/pagination.js"></script>
+    <script>
+      (function bootFixture() {
+        "use strict";
+
+        var CURSOR_PAGES = 12;
+        var PARAM_PAGES = 8;
+
+        /**
+         * Serves fake cursor and page-parameter chains so the fixture needs no network.
+         *
+         * @returns {(url: string) => Promise<string>} The HTML fetcher.
+         */
+        function createFixtureFetch() {
+          return function fetchPage(url) {
+            var pageMatch = /[?&]page=(\d+)/.exec(url);
+            if (pageMatch) {
+              var page = Number(pageMatch[1]);
+              console.log("[ghpj] probing page " + page + " from " + url);
+
+              if (page >= PARAM_PAGES) {
+                return Promise.resolve('<span class="next_page disabled">Next</span>');
+              }
+
+              return Promise.resolve(
+                '<a class="next_page" rel="next" href="?page=' + (page + 1) + '">Next</a>'
+              );
+            }
+
+            var match = /[?&]after=([^&#]*)/.exec(url);
+            var cursor = match ? decodeURIComponent(match[1]) : "";
+            var current = cursor ? Number(cursor.replace("cursor", "")) + 1 : 1;
+
+            console.log("[ghpj] indexing page " + current + " from " + url);
+
+            if (current >= CURSOR_PAGES) {
+              return Promise.resolve("<div>last page</div>");
+            }
+
+            return Promise.resolve(
+              '<a rel="nofollow" href="?after=cursor' + current + '">Next</a>'
+            );
+          };
+        }
+
+        var shared = globalThis.GitHubPageJumpShared;
+        var pagination = globalThis.GitHubPageJumpPagination;
+        if (!shared || !pagination) {
+          return;
+        }
+
+        var controller = pagination.createPaginationController({
+          document: document,
+          fetchPage: createFixtureFetch(),
+          labels: shared.MESSAGES,
+          window: window
+        });
+
+        controller.start();
+        window.addEventListener("beforeunload", function () {
+          controller.stop();
+        });
+      })();
+    </script>
+  </body>
+</html>
