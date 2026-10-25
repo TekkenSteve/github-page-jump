@@ -1,0 +1,6 @@
+dist/
+node_modules/
+coverage/
+*.zip
+*.crx
+.DS_Store

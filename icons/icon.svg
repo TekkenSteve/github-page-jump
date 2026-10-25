@@ -1,0 +1,33 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 128 128"
+  width="128"
+  height="128"
+>
+  <!-- GitHub Page Jump icon: a Primer-blue rounded square with a white
+       skip-to-last-page glyph (two chevrons and an end bar). -->
+  <defs>
+    <linearGradient id="ghpj-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f81f7" />
+      <stop offset="1" stop-color="#0969da" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#ghpj-bg)" />
+  <path
+    d="M37 41 L59 64 L37 87"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="13"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M59 41 L81 64 L59 87"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="13"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <rect x="87" y="39" width="11" height="50" rx="5.5" fill="#ffffff" />
+</svg>

@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "GitHub Page Jump",
+  "version": "0.1.0",
+  "minimum_chrome_version": "116",
+  "description": "Adds first-page, last-page, and direct page-jump controls to GitHub pagination.",
+  "homepage_url": "https://github.com/TekkenSteve/github-page-jump",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "GitHub Page Jump",
+    "default_popup": "src/popup.html"
+  },
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*"],
+      "css": ["src/content.css"],
+      "js": [
+        "src/core.js",
+        "src/cursor.js",
+        "src/pageindex.js",
+        "src/shared.js",
+        "src/pagination.js",
+        "src/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "name": "github-page-jump",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Upgrades GitHub pagination with first/last-page buttons, direct page jumps, and a background-indexed page-number window.",
+  "license": "MIT",
+  "author": "dogle",
+  "homepage": "https://github.com/TekkenSteve/github-page-jump",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TekkenSteve/github-page-jump.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TekkenSteve/github-page-jump/issues"
+  },
+  "keywords": [
+    "chrome-extension",
+    "github",
+    "pagination",
+    "manifest-v3"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check:version": "node scripts/check-version.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "node --test",
+    "test:watch": "node --test --watch",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run lint && npm run format:check && npm run typecheck && npm run check:version && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^22.10.5",
+    "eslint": "^9.18.0",
+    "globals": "^15.14.0",
+    "jsdom": "^25.0.1",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - package.json
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag and publish the packaged extension
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Resolve the current version
+        id: version
+        run: |
+          current=$(node -p "require('./package.json').version")
+          previous=$(git show HEAD~1:package.json 2>/dev/null | node -p "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));d.version" || echo "")
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+
+      - name: Stop when the version did not change
+        if: steps.version.outputs.current == steps.version.outputs.previous
+        run: echo "package.json version is unchanged; skipping the release."
+
+      - name: Set up Node.js
+        if: steps.version.outputs.current != steps.version.outputs.previous
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.version.outputs.current != steps.version.outputs.previous
+        run: npm ci
+
+      - name: Verify the release candidate
+        if: steps.version.outputs.current != steps.version.outputs.previous
+        run: |
+          npm run lint
+          npm run typecheck
+          npm run check:version
+          npm run test
+
+      - name: Package the extension
+        if: steps.version.outputs.current != steps.version.outputs.previous
+        run: npm run build
+
+      - name: Publish the GitHub release
+        if: steps.version.outputs.current != steps.version.outputs.previous
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.current }}
+        run: |
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --generate-notes \
+            dist/*.zip
