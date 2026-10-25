@@ -185,9 +185,16 @@ npm run verify  # 代码检查 + 格式 + 类型 + 版本校验 + 测试 + 打�
 ### 发布
 
 保持 `package.json#version` 与 `manifest.json#version` 一致(`npm run check:version` 强制
-校验)。当改动 `package.json#version` 的提交进入 `main` 时,Release 工作流会运行全部校验、打包
-扩展、创建 `v<版本号>` tag,并发布附带 ZIP 的 GitHub Release。仅改动 `package.json` 其他字段
-不会触发发布。
+校验)。发版时,先把版本号改动合入 `main`,再给该提交打 tag 并推送:
+
+```bash
+git tag -a v<版本号> -m "v<版本号>"
+git push origin v<版本号>
+```
+
+Release 工作流会校验 tag 与 `package.json#version` 一致,运行全部校验、打包扩展,并发布附带
+ZIP 的 GitHub Release。发布是幂等的——已有 GitHub Release 的版本会被跳过——也可以在
+Actions 页面手动运行该工作流,用于发布失败后的补发。
 
 ## 🤝 参与贡献
 

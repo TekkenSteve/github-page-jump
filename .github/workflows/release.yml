@@ -2,9 +2,9 @@ name: Release
 
 on:
   push:
-    branches: [main]
-    paths:
-      - package.json
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,34 +16,48 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
 
       - name: Resolve the current version
         id: version
-        run: |
-          current=$(node -p "require('./package.json').version")
-          previous=$(git show HEAD~1:package.json 2>/dev/null | node -p "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));d.version" || echo "")
-          echo "current=$current" >> "$GITHUB_OUTPUT"
-          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+        run: echo "current=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
 
-      - name: Stop when the version did not change
-        if: steps.version.outputs.current == steps.version.outputs.previous
-        run: echo "package.json version is unchanged; skipping the release."
+      - name: Verify the tag matches the package version
+        if: github.ref_type == 'tag'
+        env:
+          REF: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.current }}
+        run: |
+          if [ "$REF" != "v$VERSION" ]; then
+            echo "Tag $REF does not match package.json version v$VERSION."
+            exit 1
+          fi
+
+      - name: Check whether this version is already released
+        id: published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.current }}
+        run: |
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION already has a GitHub Release; skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Node.js
-        if: steps.version.outputs.current != steps.version.outputs.previous
+        if: steps.published.outputs.exists == 'false'
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
       - name: Install dependencies
-        if: steps.version.outputs.current != steps.version.outputs.previous
+        if: steps.published.outputs.exists == 'false'
         run: npm ci
 
       - name: Verify the release candidate
-        if: steps.version.outputs.current != steps.version.outputs.previous
+        if: steps.published.outputs.exists == 'false'
         run: |
           npm run lint
           npm run typecheck
@@ -51,11 +65,11 @@ jobs:
           npm run test
 
       - name: Package the extension
-        if: steps.version.outputs.current != steps.version.outputs.previous
+        if: steps.published.outputs.exists == 'false'
         run: npm run build
 
       - name: Publish the GitHub release
-        if: steps.version.outputs.current != steps.version.outputs.previous
+        if: steps.published.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.current }}

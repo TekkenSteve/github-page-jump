@@ -224,11 +224,19 @@ and `tests/fixture.html`.
 ### Releases
 
 Keep `package.json#version` and `manifest.json#version` identical
-(`npm run check:version` enforces this). When a commit that changes
-`package.json#version` lands on `main`, the Release workflow runs the checks,
-packages the extension, creates a `v<version>` tag, and publishes a GitHub
-Release with the ZIP attached. Changes to other `package.json` fields do not
-trigger a release.
+(`npm run check:version` enforces this). To publish a release, land the version
+bump on `main`, then tag that commit and push the tag:
+
+```bash
+git tag -a v<version> -m "v<version>"
+git push origin v<version>
+```
+
+The Release workflow verifies that the tag matches `package.json#version`, runs
+the checks, packages the extension, and publishes a GitHub Release with the ZIP
+attached. Publishing is idempotent — a version that already has a GitHub
+Release is skipped — and the workflow can also be started manually from the
+Actions tab to republish after a failed run.
 
 ## 🤝 Contributing
 
