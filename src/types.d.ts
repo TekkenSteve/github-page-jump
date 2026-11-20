@@ -137,11 +137,6 @@ export interface CursorCache {
   remove?: (key: string) => void;
 }
 
-export interface ListProgress {
-  indexed: number;
-  total: number | null;
-}
-
 export interface CursorIndexOptions {
   fetchPage: (url: string) => Promise<string>;
   cache?: CursorCache | null;

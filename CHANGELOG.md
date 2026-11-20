@@ -11,10 +11,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Cursor lists no longer stop short on deep commit history pages. GitHub
   sometimes serves a page whose commit rows and Prev/Next links are rendered
   client-side only, so the markup carries no `after=` link even though another
-  page exists; the number window read that as the end of the list (for example
-  stopping at 24 pages on `/commits/main`). Cursor extraction now falls back to
-  the pagination block embedded in the page payload, which names the next page
-  even when the server renders no link.
+  page exists; cursor extraction now falls back to the pagination block
+  embedded in the page payload.
+- Removed the 300-hop truncation that caused long cursor lists to stop at page 301. Commit history cursors expose a stable offset sequence, so those lists
+  now find the end with exponential search and bisection and generate any page
+  URL directly. A live 603-page repository takes 18 requests instead of 603;
+  opaque cursors such as stars and tags retain the required sequential walk.
 - A second index pass on the same list (for example after a Turbo rebuild)
   now joins the walk already in flight instead of failing with "Indexing
   failed, please retry".

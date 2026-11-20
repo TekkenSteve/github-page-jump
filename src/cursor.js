@@ -1,10 +1,9 @@
 /**
  * Cursor chain indexer for GitHub's cursor-based (Previous / Next) lists.
  *
- * Several GitHub list views render without page numbers. Those views paginate
- * with an opaque `after` cursor that cannot be derived from a page number, so
- * jumping to page N requires walking the chain one request at a time. This
- * module walks the chain once, caches it, and resolves page numbers to URLs.
+ * Several GitHub list views render without page numbers. Opaque cursors require
+ * a cached sequential walk; commit-history offset cursors support direct page
+ * URLs and logarithmic end discovery.
  *
  * Shared structural types live in `types.d.ts`.
  */
@@ -35,8 +34,9 @@ function createCursor() {
   "use strict";
 
   const DEFAULT_THROTTLE_MS = 120;
-  const DEFAULT_MAX_HOPS = 300;
+  const DEFAULT_MAX_HOPS = Number.POSITIVE_INFINITY;
   const DEFAULT_CACHE_TTL_MS = 30 * 60 * 1000;
+  const CACHE_VERSION = 2;
 
   /**
    * Reads the percent-encoded `after` cursor from a URL.
@@ -77,51 +77,66 @@ function createCursor() {
   }
 
   /**
-   * Reads the pagination block GitHub embeds into list page payloads.
+   * @param {string} url The list URL.
+   * @returns {boolean} True for GitHub commit-history routes.
+   */
+  function isCommitHistory(url) {
+    return /\/commits(?:\/|$)/.test(new URL(url).pathname);
+  }
+
+  /**
+   * Reads every pagination block GitHub embeds into its React payloads.
    *
-   * Every list page ships a `filters.pagination` object inside its embedded
-   * React data. Deep commit history pages sometimes render no commit rows and
-   * no Next link at all — the server falls back to client-side rendering — but
-   * the payload still reports where the page starts, where it ends, and whether
-   * another page exists.
+   * A page can contain several independently rendered partials, each with its
+   * own `pagination` object. Consumers must select the block that corresponds
+   * to the list cursor instead of assuming the first block owns the page.
    *
    * @param {string} html The raw list page markup.
-   * @returns {{endCursor?: unknown, hasNextPage?: unknown}|null} The pagination
-   *   block, or null when the page embeds none.
+   * @returns {Array<{startCursor?: unknown, endCursor?: unknown, hasNextPage?: unknown}>}
+   *   The structurally valid pagination blocks.
    */
-  function readEmbeddedPagination(html) {
+  function readEmbeddedPaginations(html) {
     const marker = '"pagination":{';
-    const at = html.indexOf(marker);
-    if (at < 0) {
-      return null;
-    }
+    /** @type {Array<{startCursor?: unknown, endCursor?: unknown, hasNextPage?: unknown}>} */
+    const blocks = [];
+    let searchFrom = 0;
 
-    // The block is small and only holds cursor strings and booleans, so a
-    // brace-balanced slice is enough; nothing inside it can nest arbitrarily.
-    const start = at + marker.length - 1;
-    let depth = 0;
-    const limit = Math.min(html.length, start + 2000);
+    while (searchFrom < html.length) {
+      const at = html.indexOf(marker, searchFrom);
+      if (at < 0) {
+        break;
+      }
 
-    for (let index = start; index < limit; index += 1) {
-      const character = html[index];
-      if (character === "{") {
-        depth += 1;
-      } else if (character === "}") {
-        depth -= 1;
-        if (depth === 0) {
-          try {
-            const parsed = /** @type {Record<string, unknown>} */ (
-              JSON.parse(html.slice(start, index + 1))
-            );
-            return parsed;
-          } catch (_error) {
-            return null;
+      const start = at + marker.length - 1;
+      let depth = 0;
+      const limit = Math.min(html.length, start + 2000);
+      let parsedEnd = start + 1;
+
+      for (let index = start; index < limit; index += 1) {
+        const character = html[index];
+        if (character === "{") {
+          depth += 1;
+        } else if (character === "}") {
+          depth -= 1;
+          if (depth === 0) {
+            parsedEnd = index + 1;
+            try {
+              const parsed = /** @type {Record<string, unknown>} */ (
+                JSON.parse(html.slice(start, parsedEnd))
+              );
+              blocks.push(parsed);
+            } catch (_error) {
+              // Ignore this block and continue to the next embedded partial.
+            }
+            break;
           }
         }
       }
+
+      searchFrom = Math.max(parsedEnd, at + marker.length);
     }
 
-    return null;
+    return blocks;
   }
 
   /**
@@ -136,26 +151,70 @@ function createCursor() {
    *   name one (another cursor shape, a missing block, or the last page).
    */
   function embeddedNextCursor(html) {
-    const pagination = readEmbeddedPagination(html);
-    if (!pagination) {
+    for (const pagination of readEmbeddedPaginations(html)) {
+      if (pagination.hasNextPage !== true) {
+        continue;
+      }
+
+      const cursor = encodeOffsetCursor(pagination.endCursor);
+      if (cursor) {
+        return cursor;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Converts GitHub's embedded `<anchor> <offset>` cursor to its URL form.
+   *
+   * @param {unknown} value The embedded cursor value.
+   * @returns {string|null} The URL cursor, or null for another cursor shape.
+   */
+  function encodeOffsetCursor(value) {
+    if (typeof value !== "string") {
       return null;
     }
 
-    if (pagination.hasNextPage === false) {
+    const match = /^(\S+)\s+(\d+)$/.exec(value);
+    return match ? `${match[1]}+${match[2]}` : null;
+  }
+
+  /**
+   * Parses the URL form of GitHub's commit-history offset cursor.
+   *
+   * @param {string|null} cursor The URL cursor.
+   * @returns {{anchor: string, offset: number}|null} Its components, or null for
+   *   an opaque cursor.
+   */
+  function parseOffsetCursor(cursor) {
+    if (!cursor) {
       return null;
     }
 
-    const end = pagination.endCursor;
-    if (typeof end !== "string") {
+    const match = /^([^+]+)\+(\d+)$/.exec(cursor);
+    if (!match) {
       return null;
     }
 
-    const offsetCursor = /^(\S+)\s+(\d+)$/.exec(end);
-    if (!offsetCursor) {
-      return null;
-    }
+    return { anchor: match[1], offset: Number(match[2]) };
+  }
 
-    return `${offsetCursor[1]}+${offsetCursor[2]}`;
+  /**
+   * Reads the structured pagination state embedded in a GitHub response.
+   *
+   * @param {string} html The raw list page markup.
+   * @returns {Array<{hasNext: boolean, start: {anchor: string, offset: number}|null,
+   *   end: {anchor: string, offset: number}|null}>} The parsed states.
+   */
+  function readOffsetPaginations(html) {
+    return readEmbeddedPaginations(html)
+      .filter((pagination) => typeof pagination.hasNextPage === "boolean")
+      .map((pagination) => ({
+        hasNext: /** @type {boolean} */ (pagination.hasNextPage),
+        start: parseOffsetCursor(encodeOffsetCursor(pagination.startCursor)),
+        end: parseOffsetCursor(encodeOffsetCursor(pagination.endCursor))
+      }));
   }
 
   /**
@@ -169,7 +228,7 @@ function createCursor() {
    * @param {string} html The rendered list page markup.
    * @returns {string|null} The encoded cursor for the following page.
    */
-  function extractNextCursor(html) {
+  function renderedNextCursor(html) {
     const anchors = html.match(/<a\s[^>]*>/gi) || [];
     /** @type {string[]} */
     const preferred = [];
@@ -200,7 +259,17 @@ function createCursor() {
       return source[source.length - 1];
     }
 
-    return embeddedNextCursor(html);
+    return null;
+  }
+
+  /**
+   * Extracts the next cursor, preferring GitHub's rendered navigation.
+   *
+   * @param {string} html The rendered list page markup.
+   * @returns {string|null} The encoded cursor for the following page.
+   */
+  function extractNextCursor(html) {
+    return renderedNextCursor(html) || embeddedNextCursor(html);
   }
 
   /**
@@ -241,6 +310,8 @@ function createCursor() {
     /** @type {string[]} */
     let hops = [];
     let completed = false;
+    /** @type {{anchor: string, firstOffset: number, pageSize: number, total: number|null}|null} */
+    let offsetIndex = null;
     let running = false;
     let cancelled = false;
     /** @type {Promise<{completed: boolean, hops: string[]}>|null} */
@@ -264,10 +335,13 @@ function createCursor() {
       try {
         // A corrupt or stale cache entry must never break the list view.
         const parsed =
-          /** @type {{completed?: boolean, hops?: unknown[], savedAt?: number}|null} */ (
+          /** @type {{version?: unknown, completed?: boolean, hops?: unknown[], offsetIndex?: unknown, savedAt?: number}|null} */ (
             JSON.parse(raw)
           );
-        if (!parsed || !Array.isArray(parsed.hops)) {
+        if (!parsed || parsed.version !== CACHE_VERSION || !Array.isArray(parsed.hops)) {
+          if (typeof cache.remove === "function") {
+            cache.remove(cacheKey);
+          }
           return;
         }
         if (typeof parsed.savedAt === "number" && now() - parsed.savedAt > cacheTtlMs) {
@@ -275,9 +349,26 @@ function createCursor() {
         }
 
         hops = /** @type {string[]} */ (parsed.hops.filter((value) => typeof value === "string"));
+
+        const storedOffset =
+          /** @type {{anchor?: unknown, firstOffset?: unknown, pageSize?: unknown, total?: unknown}|null} */ (
+            parsed.offsetIndex || null
+          );
+        if (
+          storedOffset &&
+          typeof storedOffset.anchor === "string" &&
+          Number.isInteger(storedOffset.firstOffset) &&
+          Number.isInteger(storedOffset.pageSize) &&
+          typeof storedOffset.pageSize === "number" &&
+          storedOffset.pageSize > 0 &&
+          (storedOffset.total === null || Number.isInteger(storedOffset.total))
+        ) {
+          offsetIndex = /** @type {typeof offsetIndex} */ (storedOffset);
+        }
         completed = Boolean(parsed.completed);
       } catch (_error) {
         hops = [];
+        offsetIndex = null;
         completed = false;
       }
     }
@@ -288,11 +379,154 @@ function createCursor() {
      * @returns {void}
      */
     function save() {
-      if (!cache || !cacheKey || hops.length === 0) {
+      if (!cache || !cacheKey || (hops.length === 0 && !offsetIndex)) {
         return;
       }
 
-      cache.write(cacheKey, JSON.stringify({ completed, hops, savedAt: now() }));
+      cache.write(
+        cacheKey,
+        JSON.stringify({ version: CACHE_VERSION, completed, hops, offsetIndex, savedAt: now() })
+      );
+    }
+
+    /**
+     * Builds the commit-history cursor for a one-based page number.
+     *
+     * @param {number} page The destination page.
+     * @returns {string|null} The generated cursor, or null when offset mode is unavailable.
+     */
+    function offsetCursorForPage(page) {
+      if (!offsetIndex || page <= 1) {
+        return null;
+      }
+
+      const offset = offsetIndex.firstOffset + (page - 2) * offsetIndex.pageSize;
+      return `${offsetIndex.anchor}+${offset}`;
+    }
+
+    /**
+     * Activates random-access mode from one commit page's embedded range.
+     *
+     * GitHub exposes both the first and last commit offsets in the structured
+     * pagination payload, so one response is enough to derive the page size.
+     *
+     * @param {string} html The fetched page body.
+     * @param {string} requestUrl The fetched list URL.
+     * @returns {boolean} True when the response proves a stable offset sequence.
+     */
+    function detectOffsetMode(html, requestUrl) {
+      if (!isCommitHistory(requestUrl)) {
+        return false;
+      }
+
+      const renderedNext = parseOffsetCursor(renderedNextCursor(html));
+      if (!renderedNext) {
+        return false;
+      }
+
+      const requested = parseOffsetCursor(readAfter(requestUrl));
+      const expectedStart = requested ? requested.offset + 1 : 0;
+      const pagination = readOffsetPaginations(html).find(
+        (candidate) =>
+          candidate.hasNext &&
+          candidate.start &&
+          candidate.end &&
+          candidate.start.anchor === candidate.end.anchor &&
+          candidate.start.offset === expectedStart &&
+          candidate.end.anchor === renderedNext.anchor &&
+          candidate.end.offset === renderedNext.offset
+      );
+      if (!pagination || !pagination.start || !pagination.end) {
+        return false;
+      }
+
+      const pageSize = pagination.end.offset - pagination.start.offset + 1;
+      if (pageSize <= 0) {
+        return false;
+      }
+
+      offsetIndex = {
+        anchor: pagination.end.anchor,
+        firstOffset: pagination.end.offset,
+        pageSize,
+        total: null
+      };
+      save();
+      return true;
+    }
+
+    /**
+     * Probes whether a generated commit-history page exists.
+     *
+     * @param {number} page The one-based page number.
+     * @param {string} baseUrl The cursor-free list URL.
+     * @param {function({indexed: number, total: number|null}): void} [onProgress] Progress sink.
+     * @returns {Promise<boolean>} True when the requested page contains a valid cursor range.
+     */
+    async function probeOffsetPage(page, baseUrl, onProgress) {
+      const cursor = offsetCursorForPage(page);
+      if (!cursor) {
+        return page === 1;
+      }
+
+      const html = await fetchPage(withAfter(baseUrl, cursor));
+      const expected = parseOffsetCursor(cursor);
+      const exists = readOffsetPaginations(html).some(
+        (pagination) =>
+          pagination.start &&
+          expected &&
+          pagination.start.anchor === expected.anchor &&
+          pagination.start.offset === expected.offset + 1
+      );
+
+      if (onProgress) {
+        onProgress({ indexed: page, total: null });
+      }
+      return exists;
+    }
+
+    /**
+     * Finds the last commit-history page with exponential search and bisection.
+     *
+     * @param {string} baseUrl The cursor-free list URL.
+     * @param {function({indexed: number, total: number|null}): void} [onProgress] Progress sink.
+     * @returns {Promise<number|null>} The total, or null when cancelled.
+     */
+    async function discoverOffsetTotal(baseUrl, onProgress) {
+      if (!offsetIndex) {
+        return null;
+      }
+      if (offsetIndex.total !== null) {
+        return offsetIndex.total;
+      }
+
+      let lower = Math.max(2, hops.length + 1);
+      let upper = lower * 2;
+
+      while (!cancelled && (await probeOffsetPage(upper, baseUrl, onProgress))) {
+        lower = upper;
+        upper *= 2;
+        await sleep(throttleMs);
+      }
+
+      while (!cancelled && upper - lower > 1) {
+        const middle = Math.floor((lower + upper) / 2);
+        if (await probeOffsetPage(middle, baseUrl, onProgress)) {
+          lower = middle;
+        } else {
+          upper = middle;
+        }
+        await sleep(throttleMs);
+      }
+
+      if (cancelled) {
+        return null;
+      }
+
+      offsetIndex.total = lower;
+      completed = true;
+      save();
+      return lower;
     }
 
     /**
@@ -324,8 +558,16 @@ function createCursor() {
             const last = hops.length > 0 ? hops[hops.length - 1] : null;
             const target = last ? withAfter(baseUrl, last) : stripAfter(baseUrl);
             const html = await fetchPage(target);
-            const next = extractNextCursor(html);
 
+            if (!offsetIndex && detectOffsetMode(html, target)) {
+              hops.push(/** @type {string} */ (offsetCursorForPage(hops.length + 2)));
+              if (needed === Number.POSITIVE_INFINITY) {
+                await discoverOffsetTotal(baseUrl, onProgress);
+              }
+              break;
+            }
+
+            const next = extractNextCursor(html);
             if (!next || next === last) {
               completed = true;
               save();
@@ -375,8 +617,29 @@ function createCursor() {
         };
       }
 
+      if (offsetIndex) {
+        const total = offsetIndex.total;
+        if (total !== null && targetPage > total) {
+          return { cancelled: false, total, url: null };
+        }
+        return {
+          cancelled: false,
+          total,
+          url: withAfter(baseUrl, /** @type {string} */ (offsetCursorForPage(targetPage)))
+        };
+      }
+
       const needed = targetPage - 1;
       const state = await ensureHops(needed, baseUrl, onProgress);
+
+      const generatedCursor = offsetCursorForPage(targetPage);
+      if (generatedCursor && targetPage > hops.length + 1) {
+        return {
+          cancelled: false,
+          total: getTotal(),
+          url: withAfter(baseUrl, generatedCursor)
+        };
+      }
 
       if (cancelled) {
         return { cancelled: true, total: state.completed ? hops.length + 1 : null, url: null };
@@ -404,7 +667,16 @@ function createCursor() {
       const state = await ensureHops(Number.POSITIVE_INFINITY, baseUrl, onProgress);
 
       if (cancelled) {
-        return { cancelled: true, total: state.completed ? hops.length + 1 : null, url: null };
+        return { cancelled: true, total: state.completed ? getTotal() : null, url: null };
+      }
+
+      if (offsetIndex) {
+        const total = await discoverOffsetTotal(baseUrl, onProgress);
+        return {
+          cancelled,
+          total,
+          url: total ? withAfter(baseUrl, /** @type {string} */ (offsetCursorForPage(total))) : null
+        };
       }
 
       const total = hops.length + 1;
@@ -424,6 +696,17 @@ function createCursor() {
         return 1;
       }
 
+      if (offsetIndex) {
+        const parsed = parseOffsetCursor(after);
+        if (!parsed || parsed.anchor !== offsetIndex.anchor) {
+          return null;
+        }
+        const delta = parsed.offset - offsetIndex.firstOffset;
+        return delta >= 0 && delta % offsetIndex.pageSize === 0
+          ? delta / offsetIndex.pageSize + 2
+          : null;
+      }
+
       const index = hops.indexOf(after);
       return index === -1 ? null : index + 2;
     }
@@ -438,6 +721,10 @@ function createCursor() {
     function getPageUrl(page, baseUrl) {
       if (page <= 1) {
         return stripAfter(baseUrl);
+      }
+
+      if (offsetIndex && (offsetIndex.total === null || page <= offsetIndex.total)) {
+        return withAfter(baseUrl, /** @type {string} */ (offsetCursorForPage(page)));
       }
 
       if (page - 2 < hops.length) {
@@ -462,7 +749,7 @@ function createCursor() {
      * @returns {number} The highest page number reachable without more crawling.
      */
     function getKnownPages() {
-      return hops.length + 1;
+      return offsetIndex && offsetIndex.total !== null ? offsetIndex.total : hops.length + 1;
     }
 
     /**
@@ -471,6 +758,9 @@ function createCursor() {
      * @returns {number|null} The total page count, or null while incomplete.
      */
     function getTotal() {
+      if (offsetIndex) {
+        return offsetIndex.total;
+      }
       return completed ? hops.length + 1 : null;
     }
 
@@ -480,7 +770,7 @@ function createCursor() {
      * @returns {boolean} True when no further pages exist.
      */
     function isComplete() {
-      return completed;
+      return offsetIndex ? offsetIndex.total !== null : completed;
     }
 
     /**
@@ -499,6 +789,7 @@ function createCursor() {
      */
     function reset() {
       hops = [];
+      offsetIndex = null;
       completed = false;
       cancelled = false;
 

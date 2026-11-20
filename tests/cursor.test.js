@@ -238,6 +238,129 @@ describe("extractNextCursor", () => {
   });
 });
 
+describe("offset cursor indexing", () => {
+  const COMMITS_BASE = "https://github.com/open-metadata/OpenMetadata/commits/main/";
+  /**
+   * Creates a GitHub commit-history response for an offset cursor.
+   *
+   * @param {number} page The requested page.
+   * @param {number} totalPages The list size.
+   * @returns {string} Embedded pagination markup.
+   */
+  function commitPage(page, totalPages) {
+    const anchor = "abc123";
+    const pageSize = 35;
+    const start = page <= totalPages ? (page - 1) * pageSize : null;
+    const end =
+      page <= totalPages ? Math.min(page * pageSize - 1, totalPages * pageSize - 1) : null;
+    const payload = JSON.stringify({
+      pagination: {
+        startCursor: start === null ? null : `${anchor} ${start}`,
+        endCursor: end === null ? null : `${anchor} ${end}`,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1
+      }
+    });
+    const next =
+      page < totalPages ? `<a rel="nofollow" href="?after=${anchor}+${end}">Next</a>` : "";
+    return payload + next;
+  }
+
+  it("finds a deep commit-history end with exponential search and bisection", async () => {
+    const totalPages = 10000;
+    /** @type {string[]} */
+    const requested = [];
+    const index = cursor.createCursorIndex({
+      fetchPage(url) {
+        requested.push(url);
+        const parsed = cursor.readAfter(url);
+        const offset = parsed ? Number(parsed.split("+")[1]) : -1;
+        const page = parsed ? (offset - 34) / 35 + 2 : 1;
+        return Promise.resolve(commitPage(page, totalPages));
+      },
+      sleep: () => Promise.resolve(),
+      throttleMs: 0
+    });
+
+    const result = await index.resolveLast({ baseUrl: COMMITS_BASE });
+
+    assert.equal(result.total, totalPages);
+    assert.equal(result.url, `${COMMITS_BASE}?after=abc123+349964`);
+    assert.equal(index.getPageUrl(9999, COMMITS_BASE), `${COMMITS_BASE}?after=abc123+349929`);
+    assert.equal(index.getCurrentPage(`${COMMITS_BASE}?after=abc123+349929`), 9999);
+    assert.equal(index.isComplete(), true);
+    assert.ok(requested.length < 40, `expected logarithmic requests, got ${requested.length}`);
+  });
+
+  it("selects the commit pagination block among unrelated React payloads", async () => {
+    let requests = 0;
+    const unrelated = JSON.stringify({
+      pagination: {
+        startCursor: "other 0",
+        endCursor: "other 9",
+        hasNextPage: true
+      }
+    });
+    const index = cursor.createCursorIndex({
+      fetchPage(url) {
+        requests += 1;
+        const parsed = cursor.readAfter(url);
+        const offset = parsed ? Number(parsed.split("+")[1]) : -1;
+        const page = parsed ? (offset - 34) / 35 + 2 : 1;
+        return Promise.resolve(unrelated + commitPage(page, 10000));
+      },
+      sleep: () => Promise.resolve(),
+      throttleMs: 0
+    });
+
+    await index.resolvePage(2, { baseUrl: COMMITS_BASE });
+    const result = await index.resolvePage(9000, { baseUrl: COMMITS_BASE });
+
+    assert.equal(result.url, `${COMMITS_BASE}?after=abc123+314964`);
+    assert.equal(requests, 1);
+  });
+
+  it("does not infer random access for non-commit cursor lists", async () => {
+    let requests = 0;
+    const index = cursor.createCursorIndex({
+      fetchPage(url) {
+        requests += 1;
+        const parsed = cursor.readAfter(url);
+        const offset = parsed ? Number(parsed.split("+")[1]) : -1;
+        const page = parsed ? (offset - 34) / 35 + 2 : 1;
+        return Promise.resolve(commitPage(page, 6));
+      },
+      sleep: () => Promise.resolve(),
+      throttleMs: 0
+    });
+
+    await index.resolveLast({ baseUrl: BASE });
+
+    assert.equal(requests, 6);
+  });
+
+  it("jumps directly after offset mode is detected", async () => {
+    let requests = 0;
+    const index = cursor.createCursorIndex({
+      fetchPage(url) {
+        requests += 1;
+        const parsed = cursor.readAfter(url);
+        const offset = parsed ? Number(parsed.split("+")[1]) : -1;
+        const page = parsed ? (offset - 34) / 35 + 2 : 1;
+        return Promise.resolve(commitPage(page, 10000));
+      },
+      sleep: () => Promise.resolve(),
+      throttleMs: 0
+    });
+
+    await index.resolvePage(2, { baseUrl: COMMITS_BASE });
+    const result = await index.resolvePage(9000, { baseUrl: COMMITS_BASE });
+
+    assert.equal(result.url, `${COMMITS_BASE}?after=abc123+314964`);
+    assert.equal(requests, 1);
+  });
+});
+
 describe("createCursorIndex", () => {
   it("requires a page fetcher", () => {
     assert.throws(() => cursor.createCursorIndex(/** @type {any} */ ({})), TypeError);
@@ -420,6 +543,17 @@ describe("cursor chain cache", () => {
     assert.equal(result.url, `${BASE}&after=c3`);
     assert.deepEqual(second.requested, []);
     assert.equal(second.index.getTotal(), 5);
+  });
+
+  it("discards caches from an older schema", () => {
+    const cache = createMemoryCache();
+    cache.write("legacy", JSON.stringify({ completed: true, hops: ["c1", "c2"] }));
+
+    const current = setup({ cache, cacheKey: "legacy", totalPages: 5 });
+
+    assert.equal(current.index.getTotal(), null);
+    assert.equal(current.index.getKnownPages(), 1);
+    assert.equal(cache.read("legacy"), null);
   });
 
   it("ignores expired cache entries", async () => {
