@@ -152,6 +152,8 @@ function createPageIndexApi() {
     let total = null;
     let running = false;
     let cancelled = false;
+    /** @type {Promise<number|null>|null} */
+    let activeProbe = null;
 
     /**
      * Restores a previously cached total.
@@ -223,99 +225,118 @@ function createPageIndexApi() {
         return total;
       }
 
-      if (running) {
-        throw new Error("page indexing is already running");
+      // The index is shared per list URL, so a second caller — a rebuilt window
+      // after a Turbo swap, or a jump while the background probe runs — joins
+      // the probe in flight instead of failing or probing in parallel.
+      if (activeProbe) {
+        await activeProbe.catch(() => {});
+      }
+
+      if (total !== null) {
+        return total;
+      }
+
+      if (cancelled) {
+        return null;
       }
 
       running = true;
       cancelled = false;
 
-      let probed = 0;
+      activeProbe = (async () => {
+        let probed = 0;
 
-      /**
-       * Probes one page, throttles, and reports progress.
-       *
-       * @param {number} page The page to probe.
-       * @returns {Promise<boolean>} True when the page links to a following page.
-       */
-      async function step(page) {
-        const has = await probe(page, baseUrl);
-        probed += 1;
+        /**
+         * Probes one page, throttles, and reports progress.
+         *
+         * @param {number} page The page to probe.
+         * @returns {Promise<boolean>} True when the page links to a following page.
+         */
+        async function step(page) {
+          const has = await probe(page, baseUrl);
+          probed += 1;
 
-        if (onProgress) {
-          onProgress({ probed, total: null });
+          if (onProgress) {
+            onProgress({ probed, total: null });
+          }
+
+          if (cancelled) {
+            return false;
+          }
+
+          await sleep(throttleMs);
+          return has;
         }
 
-        if (cancelled) {
-          return false;
-        }
+        try {
+          if (cancelled) {
+            return null;
+          }
 
-        await sleep(throttleMs);
-        return has;
-      }
+          const firstHasNext = await step(1);
 
-      try {
-        if (cancelled) {
-          return null;
-        }
+          if (cancelled) {
+            return null;
+          }
 
-        const firstHasNext = await step(1);
+          if (!firstHasNext) {
+            total = 1;
+            save();
+            return total;
+          }
 
-        if (cancelled) {
-          return null;
-        }
+          let lower = 1;
+          let candidate = 2;
+          let upper = null;
 
-        if (!firstHasNext) {
-          total = 1;
+          while (candidate <= maxPages) {
+            const has = await step(candidate);
+
+            if (cancelled) {
+              return null;
+            }
+
+            if (!has) {
+              upper = candidate;
+              break;
+            }
+
+            lower = candidate;
+            candidate *= 2;
+          }
+
+          if (cancelled) {
+            return null;
+          }
+
+          let high = upper === null ? maxPages + 1 : upper;
+
+          while (high - lower > 1) {
+            const middle = Math.floor((lower + high) / 2);
+
+            if (cancelled) {
+              return null;
+            }
+
+            if (await step(middle)) {
+              lower = middle;
+            } else {
+              high = middle;
+            }
+          }
+
+          total = high;
           save();
           return total;
+        } finally {
+          running = false;
         }
+      })();
 
-        let lower = 1;
-        let candidate = 2;
-        let upper = null;
-
-        while (candidate <= maxPages) {
-          const has = await step(candidate);
-
-          if (cancelled) {
-            return null;
-          }
-
-          if (!has) {
-            upper = candidate;
-            break;
-          }
-
-          lower = candidate;
-          candidate *= 2;
-        }
-
-        if (cancelled) {
-          return null;
-        }
-
-        let high = upper === null ? maxPages + 1 : upper;
-
-        while (high - lower > 1) {
-          const middle = Math.floor((lower + high) / 2);
-
-          if (cancelled) {
-            return null;
-          }
-
-          if (await step(middle)) {
-            lower = middle;
-          } else {
-            high = middle;
-          }
-        }
-
-        total = high;
-        save();
-        return total;
+      try {
+        return await activeProbe;
       } finally {
-        running = false;
+        activeProbe = null;
       }
     }
 

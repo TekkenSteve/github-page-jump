@@ -202,6 +202,40 @@ describe("extractNextCursor", () => {
   it("falls back to any link carrying a cursor", () => {
     assert.equal(cursor.extractNextCursor('<a href="/u?after=FALLBACK">more</a>'), "FALLBACK");
   });
+
+  it("reads the cursor from the embedded payload when no Next link is rendered", () => {
+    // Deep commit history pages omit the anchor and render the list client-side;
+    // the payload still names the page boundaries.
+    const html =
+      '<div data-target="react-app.embeddedData">' +
+      '"filters":{"pagination":{"startCursor":"401b36c 805",' +
+      '"endCursor":"401b36c 839","hasNextPage":true,"hasPreviousPage":true}}' +
+      "</div>";
+
+    assert.equal(cursor.extractNextCursor(html), "401b36c+839");
+  });
+
+  it("treats an embedded last page as the end of the chain", () => {
+    const html =
+      '"pagination":{"startCursor":"401b36c 770","endCursor":"401b36c 804",' +
+      '"hasNextPage":false,"hasPreviousPage":true}';
+
+    assert.equal(cursor.extractNextCursor(html), null);
+  });
+
+  it("ignores embedded cursors that are not offset pairs", () => {
+    const html = '"pagination":{"startCursor":"abc","endCursor":"def","hasNextPage":true}';
+
+    assert.equal(cursor.extractNextCursor(html), null);
+  });
+
+  it("prefers a rendered link over the embedded payload", () => {
+    const html =
+      '<a rel="nofollow" href="/u?after=LINK">Next</a>' +
+      '"pagination":{"endCursor":"401b36c 839","hasNextPage":true}';
+
+    assert.equal(cursor.extractNextCursor(html), "LINK");
+  });
 });
 
 describe("createCursorIndex", () => {
@@ -243,6 +277,21 @@ describe("createCursorIndex", () => {
 
     await walking;
     assert.equal(index.isRunning(), false);
+  });
+
+  it("joins a walk that is already running instead of failing", async () => {
+    const { index, requested } = setup({ totalPages: 6 });
+
+    // Two windows on the same list (a Turbo rebuild) ask at the same time.
+    const [first, second] = await Promise.all([
+      index.resolvePage(6, { baseUrl: BASE }),
+      index.resolveLast({ baseUrl: BASE })
+    ]);
+
+    assert.equal(first.url, `${BASE}&after=c5`);
+    assert.equal(second.url, `${BASE}&after=c5`);
+    // One shared walk: each page is requested exactly once.
+    assert.equal(new Set(requested).size, requested.length);
   });
 
   it("walks the chain to reach an arbitrary page", async () => {

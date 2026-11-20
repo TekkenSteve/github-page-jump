@@ -158,6 +158,20 @@ describe("createPageIndex", () => {
     assert.equal(index.isRunning(), false);
   });
 
+  it("joins a probe that is already running instead of failing", async () => {
+    const { index } = setup({ totalPages: 12 });
+
+    // Two windows on the same list (a Turbo rebuild) ask at the same time.
+    const [first, second] = await Promise.all([
+      index.resolveLast({ baseUrl: BASE }),
+      index.resolveLast({ baseUrl: BASE })
+    ]);
+
+    assert.equal(first.total, 12);
+    assert.equal(second.total, 12);
+    assert.equal(index.getTotal(), 12);
+  });
+
   it("jumps straight to a requested page without probing", async () => {
     const { index, probed } = setup({ totalPages: 12 });
     const result = await index.resolvePage(7, { baseUrl: BASE });

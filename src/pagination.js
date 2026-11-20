@@ -941,6 +941,8 @@ function createPagination(core, cursor, pageIndex) {
           return;
         }
 
+        // The index is shared per list URL, so a rebuilt window can find a pass
+        // already in flight; the index joins it and reports the final state.
         controls.dataset.autoIndex = "running";
         void runAutoIndex(index, baseUrl);
       }

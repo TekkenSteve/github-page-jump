@@ -77,7 +77,94 @@ function createCursor() {
   }
 
   /**
+   * Reads the pagination block GitHub embeds into list page payloads.
+   *
+   * Every list page ships a `filters.pagination` object inside its embedded
+   * React data. Deep commit history pages sometimes render no commit rows and
+   * no Next link at all — the server falls back to client-side rendering — but
+   * the payload still reports where the page starts, where it ends, and whether
+   * another page exists.
+   *
+   * @param {string} html The raw list page markup.
+   * @returns {{endCursor?: unknown, hasNextPage?: unknown}|null} The pagination
+   *   block, or null when the page embeds none.
+   */
+  function readEmbeddedPagination(html) {
+    const marker = '"pagination":{';
+    const at = html.indexOf(marker);
+    if (at < 0) {
+      return null;
+    }
+
+    // The block is small and only holds cursor strings and booleans, so a
+    // brace-balanced slice is enough; nothing inside it can nest arbitrarily.
+    const start = at + marker.length - 1;
+    let depth = 0;
+    const limit = Math.min(html.length, start + 2000);
+
+    for (let index = start; index < limit; index += 1) {
+      const character = html[index];
+      if (character === "{") {
+        depth += 1;
+      } else if (character === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            const parsed = /** @type {Record<string, unknown>} */ (
+              JSON.parse(html.slice(start, index + 1))
+            );
+            return parsed;
+          } catch (_error) {
+            return null;
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Derives the next cursor from a page's embedded pagination payload.
+   *
+   * Commit lists address pages as `<sha> <offset>` inside the payload, while
+   * the URL form uses `<sha>+<offset>`; the end cursor therefore names the
+   * first commit of the next page.
+   *
+   * @param {string} html The raw list page markup.
+   * @returns {string|null} The next cursor, or null when the payload cannot
+   *   name one (another cursor shape, a missing block, or the last page).
+   */
+  function embeddedNextCursor(html) {
+    const pagination = readEmbeddedPagination(html);
+    if (!pagination) {
+      return null;
+    }
+
+    if (pagination.hasNextPage === false) {
+      return null;
+    }
+
+    const end = pagination.endCursor;
+    if (typeof end !== "string") {
+      return null;
+    }
+
+    const offsetCursor = /^(\S+)\s+(\d+)$/.exec(end);
+    if (!offsetCursor) {
+      return null;
+    }
+
+    return `${offsetCursor[1]}+${offsetCursor[2]}`;
+  }
+
+  /**
    * Extracts the next cursor from a GitHub list page body.
+   *
+   * The Next link is the primary source: it is what GitHub itself would follow.
+   * When the server renders no link at all (deep commit history pages defer the
+   * list to the client), the embedded pagination payload still names the next
+   * page, so the walk can continue instead of stopping early.
    *
    * @param {string} html The rendered list page markup.
    * @returns {string|null} The encoded cursor for the following page.
@@ -109,7 +196,11 @@ function createCursor() {
     });
 
     const source = preferred.length > 0 ? preferred : fallback;
-    return source.length > 0 ? source[source.length - 1] : null;
+    if (source.length > 0) {
+      return source[source.length - 1];
+    }
+
+    return embeddedNextCursor(html);
   }
 
   /**
@@ -152,6 +243,8 @@ function createCursor() {
     let completed = false;
     let running = false;
     let cancelled = false;
+    /** @type {Promise<{completed: boolean, hops: string[]}>|null} */
+    let activeWalk = null;
 
     /**
      * Restores a previously cached chain.
@@ -211,42 +304,57 @@ function createCursor() {
      * @returns {Promise<{completed: boolean, hops: string[]}>} The chain state after walking.
      */
     async function ensureHops(needed, baseUrl, onProgress) {
-      if (running) {
-        throw new Error("cursor indexing is already running");
+      // The index is shared per list URL, so a second caller — a rebuilt
+      // window after a Turbo swap, or a jump while the background pass runs —
+      // joins the walk in flight instead of failing or crawling in parallel.
+      if (activeWalk) {
+        await activeWalk.catch(() => {});
+      }
+
+      if (cancelled || completed || hops.length >= needed || hops.length >= maxHops) {
+        return { completed, hops: hops.slice() };
       }
 
       running = true;
       cancelled = false;
 
-      try {
-        while (!cancelled && !completed && hops.length < needed && hops.length < maxHops) {
-          const last = hops.length > 0 ? hops[hops.length - 1] : null;
-          const target = last ? withAfter(baseUrl, last) : stripAfter(baseUrl);
-          const html = await fetchPage(target);
-          const next = extractNextCursor(html);
+      activeWalk = (async () => {
+        try {
+          while (!cancelled && !completed && hops.length < needed && hops.length < maxHops) {
+            const last = hops.length > 0 ? hops[hops.length - 1] : null;
+            const target = last ? withAfter(baseUrl, last) : stripAfter(baseUrl);
+            const html = await fetchPage(target);
+            const next = extractNextCursor(html);
 
-          if (!next || next === last) {
-            completed = true;
+            if (!next || next === last) {
+              completed = true;
+              save();
+              break;
+            }
+
+            hops.push(next);
             save();
-            break;
-          }
 
-          hops.push(next);
-          save();
+            if (onProgress) {
+              onProgress({ indexed: hops.length + 1, total: completed ? hops.length + 1 : null });
+            }
 
-          if (onProgress) {
-            onProgress({ indexed: hops.length + 1, total: completed ? hops.length + 1 : null });
+            if (!completed && hops.length < needed) {
+              await sleep(throttleMs);
+            }
           }
-
-          if (!completed && hops.length < needed) {
-            await sleep(throttleMs);
-          }
+        } finally {
+          running = false;
         }
-      } finally {
-        running = false;
-      }
 
-      return { completed, hops: hops.slice() };
+        return { completed, hops: hops.slice() };
+      })();
+
+      try {
+        return await activeWalk;
+      } finally {
+        activeWalk = null;
+      }
     }
 
     /**

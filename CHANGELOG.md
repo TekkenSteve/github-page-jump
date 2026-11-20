@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Cursor lists no longer stop short on deep commit history pages. GitHub
+  sometimes serves a page whose commit rows and Prev/Next links are rendered
+  client-side only, so the markup carries no `after=` link even though another
+  page exists; the number window read that as the end of the list (for example
+  stopping at 24 pages on `/commits/main`). Cursor extraction now falls back to
+  the pagination block embedded in the page payload, which names the next page
+  even when the server renders no link.
+- A second index pass on the same list (for example after a Turbo rebuild)
+  now joins the walk already in flight instead of failing with "Indexing
+  failed, please retry".
+
 ## [1.0.0] - 2026-10-26
 
 Initial release.
